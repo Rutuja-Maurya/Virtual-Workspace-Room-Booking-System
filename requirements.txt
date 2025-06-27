@@ -1,0 +1,5 @@
+# requirements.txt for Django + DRF + PostgreSQL
+Django>=5.2
+psycopg2-binary
+djangorestframework
+gunicorn
