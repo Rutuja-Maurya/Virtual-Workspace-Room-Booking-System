@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard - Virtual Workspace Room Booking</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 40px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px #ccc; }
+        h1 { text-align: center; }
+        .actions { display: flex; flex-direction: column; gap: 15px; margin: 30px 0; }
+        button { padding: 12px; font-size: 16px; border-radius: 5px; border: 1px solid #888; background: #eee; cursor: pointer; }
+        button:hover { background: #d5e8ff; }
+        .section { display: none; margin-top: 20px; }
+        .success, .error { text-align: center; margin: 10px 0; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Welcome to Your Dashboard</h1>
+    <div class="actions">
+        <button onclick="window.location.href='/book-room/'">Book a Room</button>
+        <button onclick="window.location.href='/cancel-booking/'">Cancel a Booking</button>
+        <button onclick="window.location.href='/booked-rooms/'">View All Booked Rooms</button>
+        <button onclick="window.location.href='/available-rooms/'">View All Available Rooms</button>
+        <button onclick="logout()">Logout</button>
+    </div>
+    <!--
+    <div id="book-section" class="section">
+        <h2>Book a Room</h2>
+        <form id="book-room-form">
+            <label>Room Type:
+                <select id="room-type" required>
+                    <option value="">Select type</option>
+                    <option value="private">Private</option>
+                    <option value="conference">Conference</option>
+                    <option value="shared">Shared Desk</option>
+                </select>
+            </label>
+            <label>Room:
+                <select id="room-id" required>
+                    <option value="">Select room</option>
+                </select>
+            </label>
+            <label>Date:
+                <input type="date" id="booking-date" required>
+            </label>
+            <label>Hour:
+                <select id="booking-hour" required>
+                    <option value="">Select hour</option>
+                    <option value="9">09:00 - 10:00</option>
+                    <option value="10">10:00 - 11:00</option>
+                    <option value="11">11:00 - 12:00</option>
+                    <option value="12">12:00 - 13:00</option>
+                    <option value="13">13:00 - 14:00</option>
+                    <option value="14">14:00 - 15:00</option>
+                    <option value="15">15:00 - 16:00</option>
+                    <option value="16">16:00 - 17:00</option>
+                    <option value="17">17:00 - 18:00</option>
+                </select>
+            </label>
+            <div id="team-id-section" style="display:none;">
+                <label>Team ID (for conference room):
+                    <input type="number" id="team-id">
+                </label>
+            </div>
+            <button type="submit">Book</button>
+        </form>
+    </div>
+    -->
+    <div id="cancel-section" class="section">
+        <h2>Cancel a Booking</h2>
+        <!-- Cancel form will go here -->
+    </div>
+    <div id="booked-section" class="section">
+        <h2>All Booked Rooms</h2>
+        <!-- Booked rooms table will go here -->
+    </div>
+    <div id="available-section" class="section">
+        <h2>Available Rooms</h2>
+        <!-- Available rooms table will go here -->
+    </div>
+    <div class="success" id="success-msg"></div>
+    <div class="error" id="error-msg"></div>
+</div>
+<script>
+function showSection(section) {
+    document.getElementById('book-section').style.display = 'none';
+    document.getElementById('cancel-section').style.display = 'none';
+    document.getElementById('booked-section').style.display = 'none';
+    document.getElementById('available-section').style.display = 'none';
+    document.getElementById(section + '-section').style.display = 'block';
+    document.getElementById('success-msg').innerText = '';
+    document.getElementById('error-msg').innerText = '';
+}
+function logout() {
+    // Remove token from storage and redirect to home
+    localStorage.removeItem('token');
+    window.location.href = '/';
+}
+
+// Populate rooms based on type
+document.getElementById('room-type').onchange = async function() {
+    const type = this.value;
+    const res = await fetch('/api/v1/rooms/available/?type=' + type);
+    const data = await res.json();
+    const roomSelect = document.getElementById('room-id');
+    roomSelect.innerHTML = '<option value="">Select room</option>';
+    data.rooms.forEach(room => {
+        roomSelect.innerHTML += `<option value="${room.id}">${room.name}</option>`
+    });
+}
+</script>
+</body>
+</html>
