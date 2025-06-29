@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Book a Room</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .container { max-width: 400px; margin: 40px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px #ccc; }
+        h2 { text-align: center; }
+        form { margin-top: 20px; }
+        input, select, button { width: 100%; padding: 10px; margin: 8px 0; }
+        .success, .error { text-align: center; margin: 10px 0; }
+        .success { color: green; }
+        .error { color: red; }
+        .room-info { background: #f9f9f9; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .time-slot { font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>Book a Room</h2>
+    <form id="book-room-form">
+        <label>Room Type:
+            <select id="room-type" required>
+                <option value="">Select type</option>
+                <option value="private">Private</option>
+                <option value="conference">Conference</option>
+                <option value="shared">Shared Desk</option>
+            </select>
+        </label>
+        <label>Room:
+            <select id="room-id" required>
+                <option value="">Select room</option>
+            </select>
+        </label>
+        <div id="room-info" class="room-info" style="display:none;"></div>
+        <label>Date:
+            <input type="date" id="booking-date" required>
+        </label>
+        <label>Time Slot:
+            <select id="booking-hour" required>
+                <option value="">Select time slot</option>
+                <option value="9">09:00 - 10:00</option>
+                <option value="10">10:00 - 11:00</option>
+                <option value="11">11:00 - 12:00</option>
+                <option value="12">12:00 - 13:00</option>
+                <option value="13">13:00 - 14:00</option>
+                <option value="14">14:00 - 15:00</option>
+                <option value="15">15:00 - 16:00</option>
+                <option value="16">16:00 - 17:00</option>
+                <option value="17">17:00 - 18:00</option>
+            </select>
+        </label>
+        <div id="team-id-section" style="display:none;">
+            <label>Team ID (for conference room):
+                <input type="number" id="team-id">
+            </label>
+        </div>
+        <button type="submit">Book Room</button>
+    </form>
+    <div class="success" id="success-msg"></div>
+    <div class="error" id="error-msg"></div>
+    <button onclick="window.location.href='/dashboard/'">Back to Dashboard</button>
+</div>
+<script>
+// Populate rooms based on type
+    document.getElementById('room-type').onchange = async function() {
+        const type = this.value;
+        const res = await fetch('/api/v1/rooms/available/?type=' + type);
+        const data = await res.json();
+        const roomSelect = document.getElementById('room-id');
+        const roomInfo = document.getElementById('room-info');
+        roomSelect.innerHTML = '<option value="">Select room</option>';
+        roomInfo.style.display = 'none';
+        
+        if (data.rooms.length > 0) {
+            data.rooms.forEach(room => {
+                roomSelect.innerHTML += `<option value="${room.id}" data-capacity="${room.capacity}" data-type="${room.type}">${room.name}</option>`;
+            });
+        } else {
+            roomSelect.innerHTML = '<option value="">No rooms available for this type</option>';
+        }
+        
+        // Show team input for conference
+        document.getElementById('team-id-section').style.display = (type === 'conference') ? 'block' : 'none';
+    };
+
+    // Show room info when room is selected
+    document.getElementById('room-id').onchange = function() {
+        const selectedOption = this.options[this.selectedIndex];
+        const roomInfo = document.getElementById('room-info');
+        
+        if (this.value) {
+            const capacity = selectedOption.getAttribute('data-capacity');
+            const type = selectedOption.getAttribute('data-type');
+            roomInfo.innerHTML = `
+                <strong>Room Type:</strong> ${type}<br>
+                <strong>Capacity:</strong> ${capacity} ${type === 'shared' ? 'people' : 'person'}
+            `;
+            roomInfo.style.display = 'block';
+        } else {
+            roomInfo.style.display = 'none';
+        }
+    };
+
+    // Check availability when date and hour are selected
+    async function checkAvailability() {
+        const roomType = document.getElementById('room-type').value;
+        const date = document.getElementById('booking-date').value;
+        const hour = document.getElementById('booking-hour').value;
+        
+        if (roomType && date && hour) {
+            const res = await fetch(`/api/v1/rooms/available/?type=${roomType}&date=${date}&hour=${hour}`);
+            const data = await res.json();
+            
+            if (data.message) {
+                // No rooms available for this slot and type
+                document.getElementById('error-msg').innerText = data.message;
+                document.getElementById('success-msg').innerText = '';
+                return false;
+            } else if (data.rooms.length === 0) {
+                document.getElementById('error-msg').innerText = 'No available room for the selected slot and type.';
+                document.getElementById('success-msg').innerText = '';
+                return false;
+            } else {
+                document.getElementById('error-msg').innerText = '';
+                return true;
+            }
+        }
+        return true;
+    }
+
+    // Check availability when date or hour changes
+    document.getElementById('booking-date').onchange = checkAvailability;
+    document.getElementById('booking-hour').onchange = checkAvailability;
+
+    // Handle booking form submit
+    document.getElementById('book-room-form').onsubmit = async function(e) {
+        e.preventDefault();
+        
+        // Clear previous messages
+        document.getElementById('success-msg').innerText = '';
+        document.getElementById('error-msg').innerText = '';
+        
+        const token = localStorage.getItem('token');
+        const room_id = document.getElementById('room-id').value;
+        const date = document.getElementById('booking-date').value;
+        const hour = document.getElementById('booking-hour').value;
+        const type = document.getElementById('room-type').value;
+        let body = { room_id, date, hour };
+
+        if (type === 'conference') {
+            body.team_id = document.getElementById('team-id').value;
+        }
+
+        const res = await fetch('/api/v1/bookings/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Token ' + token
+            },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (res.ok) {
+            document.getElementById('success-msg').innerText = 'Booking successful!';
+            document.getElementById('error-msg').innerText = '';
+        } else {
+            document.getElementById('error-msg').innerText = data.detail || 'Booking failed.';
+            document.getElementById('success-msg').innerText = '';
+        }
+    };
+</script>
+</body>
+</html>
