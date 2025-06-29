@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from booking.views import BookingViewSet, RegisterView, LoginView, home, dashboard, AvailableRoomsView, book_room, available_rooms_page, booked_rooms_page, cancel_booking_page, CancelBookingView
+from booking.views import BookingViewSet, RegisterView, LoginView, home, dashboard, AvailableRoomsView, book_room, available_rooms_page, booked_rooms_page, cancel_booking_page, CancelBookingView, create_team, create_team_page
 from rest_framework.authtoken.views import obtain_auth_token
 
 router = DefaultRouter()
@@ -37,4 +37,6 @@ urlpatterns = [
     path('booked-rooms/', booked_rooms_page, name='booked-rooms-page'),
     path('api/v1/cancel/<str:booking_id>/', CancelBookingView.as_view(), name='cancel-booking'),
     path('cancel-booking/', cancel_booking_page, name='cancel-booking-page'),
+    path('api/v1/teams/create/', create_team, name='create_team'),
+    path('create-team/', create_team_page, name='create_team_page'),
 ]

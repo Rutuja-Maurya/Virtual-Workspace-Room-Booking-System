@@ -52,22 +52,27 @@ class RoomSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'room_type', 'capacity']
 
 class BookingSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    team = TeamSerializer(read_only=True)
-    user_id = serializers.PrimaryKeyRelatedField(
-        queryset=AuthUser.objects.all(), write_only=True, required=False, allow_null=True, source='user'
-    )
-    team_id = serializers.PrimaryKeyRelatedField(
-        queryset=Team.objects.all(), write_only=True, required=False, allow_null=True, source='team'
-    )
-    room = RoomSerializer(read_only=True)
-    room_id = serializers.PrimaryKeyRelatedField(
-        queryset=Room.objects.all(), write_only=True, source='room'
-    )
+    user = serializers.SerializerMethodField()
+    room = serializers.SerializerMethodField()
+    type = serializers.SerializerMethodField()
+    team_id = serializers.SerializerMethodField()
+    team_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
-        fields = [
-            'id', 'room', 'room_id', 'user', 'user_id', 'team', 'team_id',
-            'date', 'hour', 'booking_id', 'created_at'
-        ] 
+        fields = ['booking_id', 'user', 'room', 'type', 'date', 'hour', 'team_id', 'team_name']
+
+    def get_user(self, obj):
+        return obj.user.username if obj.user else ""
+
+    def get_room(self, obj):
+        return obj.room.name if obj.room else ""
+
+    def get_type(self, obj):
+        return obj.room.room_type if obj.room else ""
+
+    def get_team_id(self, obj):
+        return obj.team.id if obj.team else ""
+
+    def get_team_name(self, obj):
+        return obj.team.name if obj.team else "" 

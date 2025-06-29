@@ -9,6 +9,7 @@
         h2 { text-align: center; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+        th:nth-child(5), td:nth-child(5) { min-width: 120px; } /* Date column */
         .success, .error { text-align: center; margin: 10px 0; }
         .success { color: green; }
         .error { color: red; }
@@ -17,46 +18,100 @@
 <body>
 <div class="container">
     <h2>All Booked Rooms</h2>
+    <div style="text-align:center; margin-bottom: 20px;">
+        <label for="room-type-filter">Filter by Room Type:</label>
+        <select id="room-type-filter">
+            <option value="">All</option>
+            <option value="conference">Conference</option>
+            <option value="private">Private</option>
+            <option value="shared">Shared Desk</option>
+        </select>
+    </div>
     <table id="booked-rooms-table">
         <thead>
             <tr>
                 <th>Booking ID</th>
-                <th>User</th>
+                <th id="user-th">User</th>
                 <th>Room</th>
                 <th>Type</th>
                 <th>Date</th>
                 <th>Hour</th>
+                <th id="team-id-th" style="display:none;">Team ID</th>
+                <th id="team-name-th" style="display:none;">Team Name</th>
             </tr>
         </thead>
-        <tbody></tbody>
+        <tbody id="bookings-tbody"></tbody>
     </table>
     <button onclick="window.location.href='/dashboard/'">Back to Dashboard</button>
 </div>
 <script>
+let allBookings = [];
+
 async function fetchBookings() {
     const token = localStorage.getItem('token');
+    if (!token) {
+        window.location.href = '/login/';
+    }
     const res = await fetch('/api/v1/bookings/', {
-        headers: { 'Authorization': 'Token ' + token }
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Token ' + token
+        }
     });
     const data = await res.json();
-    const tbody = document.getElementById('booked-rooms-table').querySelector('tbody');
+    allBookings = data;
+    renderBookings(allBookings, document.getElementById('room-type-filter').value);
+}
+
+function renderBookings(bookings, filterType) {
+    const tbody = document.getElementById('bookings-tbody');
     tbody.innerHTML = '';
-    if (data.length > 0) {
-        data.forEach(booking => {
-            tbody.innerHTML += `<tr>
-                <td>${booking.booking_id}</td>
-                <td>${booking.user ? booking.user.username : (booking.team ? booking.team.name : '')}</td>
-                <td>${booking.room ? booking.room.name : ''}</td>
-                <td>${booking.room ? booking.room.room_type : ''}</td>
+
+    // Show/hide columns
+    document.getElementById('user-th').style.display = (filterType === 'conference') ? 'none' : '';
+    document.getElementById('team-id-th').style.display = (filterType === 'conference') ? '' : 'none';
+    document.getElementById('team-name-th').style.display = (filterType === 'conference') ? '' : 'none';
+
+    bookings.forEach(booking => {
+        // Only show bookings matching the filter
+        if (filterType && booking.type !== filterType) return;
+
+        let row = `<tr>
+            <td>${booking.booking_id}</td>`;
+
+        if (filterType === 'conference') {
+            row += `
+                <td style="display:none;"></td>
+                <td>${booking.room}</td>
+                <td>${booking.type}</td>
                 <td>${booking.date}</td>
                 <td>${booking.hour}:00 - ${parseInt(booking.hour)+1}:00</td>
-            </tr>`;
-        });
-    } else {
-        tbody.innerHTML = '<tr><td colspan="6">No bookings found.</td></tr>';
-    }
+                <td>${booking.team_id || ''}</td>
+                <td>${booking.team_name || ''}</td>
+            `;
+        } else {
+            row += `
+                <td>${booking.user}</td>
+                <td>${booking.room}</td>
+                <td>${booking.type}</td>
+                <td>${booking.date}</td>
+                <td>${booking.hour}:00 - ${parseInt(booking.hour)+1}:00</td>
+                <td style="display:none;"></td>
+                <td style="display:none;"></td>
+            `;
+        }
+        row += `</tr>`;
+        tbody.innerHTML += row;
+    });
 }
-fetchBookings();
+
+// Filter on dropdown change
+document.getElementById('room-type-filter').onchange = function() {
+    const type = this.value;
+    renderBookings(allBookings, type);
+};
+
+window.onload = fetchBookings;
 </script>
 </body>
 </html>

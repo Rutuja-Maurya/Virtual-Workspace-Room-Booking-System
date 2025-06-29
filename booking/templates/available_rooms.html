@@ -14,18 +14,27 @@
         .success, .error { text-align: center; margin: 10px 0; }
         .success { color: green; }
         .error { color: red; }
+        .time-slot-info { background: #f0f8ff; padding: 10px; margin: 10px 0; border-radius: 4px; text-align: center; }
     </style>
 </head>
 <body>
 <div class="container">
     <h2>View All Available Rooms</h2>
     <form id="available-rooms-form">
+        <label>Room Type (Optional):
+            <select id="room-type-filter">
+                <option value="">All Types</option>
+                <option value="private">Private</option>
+                <option value="conference">Conference</option>
+                <option value="shared">Shared Desk</option>
+            </select>
+        </label>
         <label>Date:
             <input type="date" id="available-date" required>
         </label>
-        <label>Hour:
+        <label>Time Slot:
             <select id="available-hour" required>
-                <option value="">Select hour</option>
+                <option value="">Select time slot</option>
                 <option value="9">09:00 - 10:00</option>
                 <option value="10">10:00 - 11:00</option>
                 <option value="11">11:00 - 12:00</option>
@@ -39,40 +48,71 @@
         </label>
         <button type="submit">Show Available Rooms</button>
     </form>
+    <div id="time-slot-info" class="time-slot-info" style="display:none;"></div>
     <table id="available-rooms-table" style="display:none;">
         <thead>
             <tr>
                 <th>Room Name</th>
                 <th>Type</th>
                 <th>Capacity</th>
+                <th>Available Spots</th>
             </tr>
         </thead>
         <tbody></tbody>
     </table>
+    <div class="error" id="no-rooms-msg" style="display:none;"></div>
     <button onclick="window.location.href='/dashboard/'">Back to Dashboard</button>
 </div>
 <script>
 document.getElementById('available-rooms-form').onsubmit = async function(e) {
     e.preventDefault();
+    const roomType = document.getElementById('room-type-filter').value;
     const date = document.getElementById('available-date').value;
     const hour = document.getElementById('available-hour').value;
-    const res = await fetch(`/api/v1/rooms/available/?date=${date}&hour=${hour}`);
+    
+    // Build query parameters
+    let queryParams = `date=${date}&hour=${hour}`;
+    if (roomType) {
+        queryParams += `&type=${roomType}`;
+    }
+    
+    const res = await fetch(`/api/v1/rooms/available/?${queryParams}`);
     const data = await res.json();
+    
     const table = document.getElementById('available-rooms-table');
     const tbody = table.querySelector('tbody');
+    const noRoomsMsg = document.getElementById('no-rooms-msg');
+    const timeSlotInfo = document.getElementById('time-slot-info');
+    
+    // Clear previous content
     tbody.innerHTML = '';
-    if (data.rooms.length > 0) {
+    table.style.display = 'none';
+    noRoomsMsg.style.display = 'none';
+    timeSlotInfo.style.display = 'none';
+    
+    // Show time slot information
+    const hourText = document.getElementById('available-hour').options[document.getElementById('available-hour').selectedIndex].text;
+    timeSlotInfo.innerHTML = `<strong>Checking availability for:</strong> ${date} at ${hourText}`;
+    timeSlotInfo.style.display = 'block';
+    
+    if (data.message) {
+        // Specific message when no rooms available for this slot and type
+        noRoomsMsg.innerText = data.message;
+        noRoomsMsg.style.display = 'block';
+    } else if (data.rooms.length > 0) {
         data.rooms.forEach(room => {
+            const availableSpots = room.available_spots || (room.type === 'shared' ? room.capacity : 1);
             tbody.innerHTML += `<tr>
                 <td>${room.name}</td>
-                <td>${room.type || ''}</td>
-                <td>${room.capacity || ''}</td>
+                <td>${room.type}</td>
+                <td>${room.capacity}</td>
+                <td>${availableSpots}</td>
             </tr>`;
         });
-        table.style.display = '';
+        table.style.display = 'table';
     } else {
-        tbody.innerHTML = '<tr><td colspan="3">No available rooms for this slot.</td></tr>';
-        table.style.display = '';
+        noRoomsMsg.innerText = 'No available rooms for this slot.';
+        noRoomsMsg.style.display = 'block';
     }
 };
 </script>

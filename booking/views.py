@@ -12,6 +12,8 @@ import uuid
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.core.exceptions import ValidationError
+from rest_framework.decorators import api_view, permission_classes
 
 # Create your views here.
 
@@ -64,6 +66,14 @@ class BookingViewSet(viewsets.ModelViewSet):
         except Room.DoesNotExist:
             return Response({'detail': 'Room does not exist.'}, status=404)
 
+        # Validate hour range
+        try:
+            hour = int(hour)
+            if hour < 9 or hour > 18:
+                return Response({'detail': 'Booking hours must be between 9 and 18 (9AM-6PM).'}, status=400)
+        except ValueError:
+            return Response({'detail': 'Invalid hour value.'}, status=400)
+
         # Booking for private room: only individual users
         if room.room_type == 'private':
             # Only allow if no team_id is provided (individual user)
@@ -87,35 +97,38 @@ class BookingViewSet(viewsets.ModelViewSet):
             if team_id:
                 return Response({'detail': 'Shared desks can only be booked by individual users.'}, status=400)
 
-        # Prevent double booking for user/team in the same slot (any room)
-        if not team_id:
-            # Check if the logged-in user already has a booking for this slot
-            if Booking.objects.filter(user=user, date=date, hour=hour).exists():
-                return Response({'detail': 'You already have a booking for this slot.'}, status=400)
-        if team_id:
-            # Check if the team already has a booking for this slot
-            if Booking.objects.filter(team_id=team_id, date=date, hour=hour).exists():
-                return Response({'detail': 'Your team already has a booking for this slot.'}, status=400)
-
-        # Remove user_id from data if present (for safety)
-        data.pop('user_id', None)
-
-        # Generate unique booking_id
-        data['booking_id'] = str(uuid.uuid4())
-
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
         try:
-            with transaction.atomic():
-                # For private/shared bookings, set the user before saving
-                if not team_id:
-                    serializer.save(user=request.user)  # Set the user field to the logged-in user
-                else:
-                    serializer.save()
-        except Exception as e:
+            # Use the new locking method to create booking
+            if team_id:
+                try:
+                    team = Team.objects.get(id=team_id)
+                except Team.DoesNotExist:
+                    return Response({'detail': 'Team does not exist.'}, status=404)
+                booking = Booking.create_booking_with_lock(
+                    room=room,
+                    team=team,
+                    date=date,
+                    hour=hour
+                )
+            else:
+                booking = Booking.create_booking_with_lock(
+                    room=room,
+                    user=user,
+                    date=date,
+                    hour=hour
+                )
+            
+            # Serialize the created booking
+            serializer = self.get_serializer(booking)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            
+        except ValidationError as e:
             return Response({'detail': str(e)}, status=400)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=400)
+        except Exception as e:
+            return Response({'detail': 'An error occurred while creating the booking.'}, status=500)
 
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
@@ -136,34 +149,47 @@ class AvailableRoomsView(APIView):
         if room_type:
             rooms = rooms.filter(room_type=room_type)
         available_rooms = []
+        
         for room in rooms:
             if date and hour:
-                # For shared desk, check capacity
-                if room.room_type == 'shared':
-                    count = Booking.objects.filter(room=room, date=date, hour=hour).count()
-                    if count < room.capacity:
+                try:
+                    hour_int = int(hour)
+                    # Use the new locking method to check availability
+                    is_available = Booking.check_availability(room, date, hour_int)
+                    if is_available:
+                        # Get current booking count for shared desks
+                        if room.room_type == 'shared':
+                            count = Booking.objects.filter(room=room, date=date, hour=hour_int).count()
+                            available_spots = room.capacity - count
+                        else:
+                            available_spots = 1
+                        
                         available_rooms.append({
                             'id': room.id,
                             'name': room.name,
                             'type': room.room_type,
-                            'capacity': room.capacity
+                            'capacity': room.capacity,
+                            'available_spots': available_spots
                         })
-                else:
-                    exists = Booking.objects.filter(room=room, date=date, hour=hour).exists()
-                    if not exists:
-                        available_rooms.append({
-                            'id': room.id,
-                            'name': room.name,
-                            'type': room.room_type,
-                            'capacity': room.capacity
-                        })
+                except ValueError:
+                    # Skip invalid hour values
+                    continue
             else:
                 available_rooms.append({
                     'id': room.id,
                     'name': room.name,
                     'type': room.room_type,
-                    'capacity': room.capacity
+                    'capacity': room.capacity,
+                    'available_spots': room.capacity if room.room_type == 'shared' else 1
                 })
+        
+        # If specific slot and type are requested but no rooms available, provide specific message
+        if date and hour and room_type and not available_rooms:
+            return Response({
+                'rooms': [],
+                'message': 'No available room for the selected slot and type.'
+            })
+        
         return Response({'rooms': available_rooms})
 
 def book_room(request):
@@ -194,3 +220,24 @@ class CancelBookingView(APIView):
         
         booking.delete()
         return Response({'detail': 'Booking cancelled successfully!'}, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_team(request):
+    name = request.data.get('name')
+    member_usernames = request.data.get('members', [])
+    if not name or not member_usernames:
+        return Response({'detail': 'Team name and at least 3 members are required.'}, status=400)
+    if len(member_usernames) < 3:
+        return Response({'detail': 'Conference rooms require a team of at least 3 members.'}, status=400)
+    from django.contrib.auth.models import User
+    members = User.objects.filter(username__in=member_usernames)
+    if members.count() < 3:
+        return Response({'detail': 'Some users not found or less than 3 valid members.'}, status=400)
+    team = Team.objects.create(name=name)
+    team.members.set(members)
+    team.save()
+    return Response({'id': team.id, 'name': team.name, 'members': [u.username for u in members]}, status=201)
+
+def create_team_page(request):
+    return render(request, 'create_team.html')
