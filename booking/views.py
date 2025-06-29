@@ -17,10 +17,12 @@ from rest_framework.decorators import api_view, permission_classes
 
 # Create your views here.
 
+# RegisterView handles user registration and token creation
 @method_decorator(csrf_exempt, name='dispatch')
 class RegisterView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
+        # Validate and create user and profile, return token
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -32,10 +34,12 @@ class RegisterView(APIView):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+# LoginView handles user authentication and returns token and profile
 @method_decorator(csrf_exempt, name='dispatch')
 class LoginView(ObtainAuthToken):
     permission_classes = [AllowAny]
     def post(self, request, *args, **kwargs):
+        # Authenticate user and return token and profile
         response = super().post(request, *args, **kwargs)
         token = Token.objects.get(key=response.data['token'])
         user = token.user
@@ -45,11 +49,13 @@ class LoginView(ObtainAuthToken):
             'user': UserProfileSerializer(profile).data
         })
 
+# BookingViewSet handles booking creation, listing, and validation
 class BookingViewSet(viewsets.ModelViewSet):
     queryset = Booking.objects.all().order_by('-created_at')
     serializer_class = BookingSerializer
 
     def create(self, request, *args, **kwargs):
+        # Extract and validate booking data
         data = request.data.copy()
         room_id = data.get('room_id')
         team_id = data.get('team_id')
@@ -74,14 +80,13 @@ class BookingViewSet(viewsets.ModelViewSet):
         except ValueError:
             return Response({'detail': 'Invalid hour value.'}, status=400)
 
-        # Booking for private room: only individual users
+        # Business rules for room types
         if room.room_type == 'private':
-            # Only allow if no team_id is provided (individual user)
+            # Private rooms: only individual users
             if team_id:
                 return Response({'detail': 'Private rooms can only be booked by individual users.'}, status=400)
-        # Booking for conference room: only teams with 3+ (excluding children for seat count)
         elif room.room_type == 'conference':
-            # Only allow if team_id is provided
+            # Conference rooms: only teams with 3+ members
             if not team_id:
                 return Response({'detail': 'Conference rooms can only be booked by teams.'}, status=400)
             try:
@@ -91,14 +96,13 @@ class BookingViewSet(viewsets.ModelViewSet):
             members = team.members.all()
             if members.count() < 3:
                 return Response({'detail': 'Conference rooms require a team of at least 3 members.'}, status=400)
-        # Shared desk: only individuals, up to 4 per slot
         elif room.room_type == 'shared':
-            # Only allow if no team_id is provided (individual user)
+            # Shared desks: only individuals
             if team_id:
                 return Response({'detail': 'Shared desks can only be booked by individual users.'}, status=400)
 
         try:
-            # Use the new locking method to create booking
+            # Use locking method to prevent race conditions
             if team_id:
                 try:
                     team = Team.objects.get(id=team_id)
@@ -117,12 +121,10 @@ class BookingViewSet(viewsets.ModelViewSet):
                     date=date,
                     hour=hour
                 )
-            
-            # Serialize the created booking
+            # Serialize and return the created booking
             serializer = self.get_serializer(booking)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-            
         except ValidationError as e:
             return Response({'detail': str(e)}, status=400)
         except ValueError as e:
@@ -131,14 +133,18 @@ class BookingViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'An error occurred while creating the booking.'}, status=500)
 
     def list(self, request, *args, **kwargs):
+        # List all bookings for the user
         return super().list(request, *args, **kwargs)
 
+# Render home page
 def home(request):
     return render(request, 'home.html')
 
+# Render dashboard page
 def dashboard(request):
     return render(request, 'dashboard.html')
 
+# AvailableRoomsView returns available rooms for a given type, date, and hour
 class AvailableRoomsView(APIView):
     permission_classes = [AllowAny]
     def get(self, request):
@@ -149,21 +155,20 @@ class AvailableRoomsView(APIView):
         if room_type:
             rooms = rooms.filter(room_type=room_type)
         available_rooms = []
-        
+        # Check each room for availability
         for room in rooms:
             if date and hour:
                 try:
                     hour_int = int(hour)
-                    # Use the new locking method to check availability
+                    # Use locking method to check availability
                     is_available = Booking.check_availability(room, date, hour_int)
                     if is_available:
-                        # Get current booking count for shared desks
+                        # For shared desks, calculate available spots
                         if room.room_type == 'shared':
                             count = Booking.objects.filter(room=room, date=date, hour=hour_int).count()
                             available_spots = room.capacity - count
                         else:
                             available_spots = 1
-                        
                         available_rooms.append({
                             'id': room.id,
                             'name': room.name,
@@ -182,45 +187,47 @@ class AvailableRoomsView(APIView):
                     'capacity': room.capacity,
                     'available_spots': room.capacity if room.room_type == 'shared' else 1
                 })
-        
-        # If specific slot and type are requested but no rooms available, provide specific message
+        # If no rooms available for the slot, return a message
         if date and hour and room_type and not available_rooms:
             return Response({
                 'rooms': [],
                 'message': 'No available room for the selected slot and type.'
             })
-        
         return Response({'rooms': available_rooms})
 
+# Render book room page
 def book_room(request):
     return render(request, 'book_room.html')
 
+# Render available rooms page
 def available_rooms_page(request):
     return render(request, 'available_rooms.html')
 
+# Render booked rooms page
 def booked_rooms_page(request):
     return render(request, 'booked_rooms.html')
 
+# Render cancel booking page
 def cancel_booking_page(request):
     return render(request, 'cancel_booking.html')
 
+# CancelBookingView handles booking cancellation and slot freeing
 class CancelBookingView(APIView):
     permission_classes = [IsAuthenticated]
-
     def post(self, request, booking_id):
         user = request.user
         try:
             booking = Booking.objects.get(booking_id=booking_id)
         except Booking.DoesNotExist:
             return Response({'detail': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
-        
         # Only allow if the booking was made by this user
         if booking.user != user:
             return Response({'detail': 'No booking done by you with this booking ID.'}, status=status.HTTP_403_FORBIDDEN)
-        
+        # Delete booking to free up slot
         booking.delete()
         return Response({'detail': 'Booking cancelled successfully!'}, status=status.HTTP_200_OK)
 
+# create_team API endpoint to create a new team with members
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_team(request):
@@ -239,5 +246,6 @@ def create_team(request):
     team.save()
     return Response({'id': team.id, 'name': team.name, 'members': [u.username for u in members]}, status=201)
 
+# Render create team page
 def create_team_page(request):
     return render(request, 'create_team.html')
